@@ -1,6 +1,6 @@
 # Open-Composio: Recommendations
 
-*Date: July 27, 2026 — follows from [RESEARCH.md](RESEARCH.md)*
+*Date: July 27, 2026*
 
 **Positioning: "The local-first MCP tool gateway."** One MCP server, an uncrippled catalog, credentials that never leave the machine. Not "free Composio" — the wedge is the trust model plus day-one compatibility with Claude Code, Claude Desktop, Cursor, and every other MCP client.
 
