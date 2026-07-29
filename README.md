@@ -2,7 +2,7 @@
 
 **The local-first MCP tool gateway.** Agent tool integrations — GitHub, web search, weather, your own functions — behind one MCP server and one embeddable SDK, with credentials that **never leave your machine**. Secrets live in your OS keychain (Windows Credential Manager, macOS Keychain, Linux Secret Service), not in anyone's cloud.
 
-Why this exists: hosted tool platforms route your OAuth tokens and API keys through their servers, and their "self-hosted" tiers are closed-source or catalog-crippled. See [RECOMMENDATIONS.md](RECOMMENDATIONS.md) for the design.
+Why this exists: hosted tool platforms route your OAuth tokens and API keys through their servers, and their "self-hosted" tiers are closed-source or catalog-crippled.
 
 ## Install
 
@@ -69,4 +69,4 @@ Binding beyond localhost requires `OPEN_COMPOSIO_API_TOKEN` (enforced).
 
 ## Roadmap
 
-Per [RECOMMENDATIONS.md](RECOMMENDATIONS.md): OAuth loopback flows (`gh auth login`-style), declarative YAML catalog with community specs, per-connection permission allowlists, pinned tools as first-class MCP tools, TypeScript SDK.
+OAuth loopback flows (`gh auth login`-style), declarative YAML catalog with community specs, per-connection permission allowlists, pinned tools as first-class MCP tools, TypeScript SDK.
