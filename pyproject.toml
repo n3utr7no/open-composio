@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "open-composio"
+version = "0.2.0"
+description = "Local-first MCP tool gateway: agent tool integrations whose credentials never leave your machine."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["mcp", "agents", "tools", "local-first", "function-calling"]
+dependencies = [
+    "pydantic>=2",
+    "httpx>=0.27",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "keyring>=24",
+    "cryptography>=42",
+    "mcp>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+open-composio = "open_composio.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["open_composio*"]
+
+[tool.setuptools.package-data]
+open_composio = ["dashboard/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
