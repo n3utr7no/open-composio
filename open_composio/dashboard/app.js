@@ -44,7 +44,7 @@ document.head.appendChild(toastStyle);
 let apps = [];
 let currentApp = null;
 let currentAction = null;
-let logs = JSON.parse(localStorage.getItem("open_composio_logs") || "[]");
+let logs = []; // populated from the server-side audit log (/api/audit)
 
 // Elements
 const appsGrid = document.getElementById("apps-grid");
@@ -75,7 +75,7 @@ const executionResultJson = document.getElementById("execution-result-json");
 
 // Logs
 const logsList = document.getElementById("logs-list");
-const clearLogsBtn = document.getElementById("clear-logs-btn");
+const refreshLogsBtn = document.getElementById("refresh-logs-btn");
 
 // Navigation
 const navIntegrations = document.getElementById("nav-integrations");
@@ -87,7 +87,7 @@ const logsView = document.getElementById("logs-view");
 async function init() {
     setupEventListeners();
     await fetchApps();
-    renderLogs();
+    await fetchLogs();
 }
 
 // Event Listeners
@@ -136,12 +136,8 @@ function setupEventListeners() {
     // Action Run Form
     actionRunForm.addEventListener("submit", handleActionRun);
 
-    // Clear Logs
-    clearLogsBtn.addEventListener("click", () => {
-        logs = [];
-        localStorage.setItem("open_composio_logs", JSON.stringify(logs));
-        renderLogs();
-    });
+    // Refresh audit log
+    refreshLogsBtn.addEventListener("click", fetchLogs);
 }
 
 function setActiveSection(section) {
@@ -484,8 +480,8 @@ async function handleActionRun(e) {
         executionResultJson.textContent = JSON.stringify(data, null, 2);
         executionOutputBox.classList.remove("hidden");
 
-        // Log the execution
-        logExecution(currentApp.id, currentAction.name, params, data);
+        // The server-side audit log records the execution; refresh our copy
+        fetchLogs();
     } catch (error) {
         console.error(error);
         executionResultJson.textContent = JSON.stringify({ error: "Failed to execute action." }, null, 2);
@@ -496,17 +492,17 @@ async function handleActionRun(e) {
     }
 }
 
-// Log Executions
-function logExecution(appId, actionName, input, output) {
-    const logItem = {
-        app_id: appId,
-        action_name: actionName,
-        timestamp: new Date().toLocaleTimeString(),
-        input: input,
-        output: output
-    };
-    logs.unshift(logItem);
-    localStorage.setItem("open_composio_logs", JSON.stringify(logs));
+// Audit log (server-side; params are hashed, never stored raw)
+async function fetchLogs() {
+    try {
+        const response = await fetch(`${API_BASE}/audit?limit=100`);
+        if (!response.ok) throw new Error("Failed to fetch audit log");
+        const data = await response.json();
+        logs = data.records;
+    } catch (error) {
+        console.error("Error fetching audit log:", error);
+        logs = [];
+    }
     renderLogs();
 }
 
@@ -523,24 +519,30 @@ function renderLogs() {
 
     logsList.innerHTML = "";
     logs.forEach(log => {
+        const statusColor = log.status === "ok" ? "#10b981" : "#ef4444";
         const card = document.createElement("div");
         card.className = "log-card";
         card.innerHTML = `
             <div class="log-meta">
-                <span class="log-action-badge">${log.app_id}.${log.action_name}</span>
-                <span class="log-time">${log.timestamp}</span>
+                <span class="log-action-badge"></span>
+                <span class="log-time"></span>
             </div>
             <div class="log-body">
                 <div class="log-block">
-                    <h5>Input Params</h5>
-                    <pre>${JSON.stringify(log.input, null, 2)}</pre>
+                    <h5>Status</h5>
+                    <pre style="color:${statusColor}"></pre>
                 </div>
                 <div class="log-block">
-                    <h5>Output Response</h5>
-                    <pre>${JSON.stringify(log.output, null, 2)}</pre>
+                    <h5>Params fingerprint (sha256/16)</h5>
+                    <pre></pre>
                 </div>
             </div>
         `;
+        card.querySelector(".log-action-badge").textContent = `${log.app_id}.${log.action}`;
+        card.querySelector(".log-time").textContent = new Date(log.ts * 1000).toLocaleString();
+        card.querySelector(".log-block:nth-child(1) pre").textContent =
+            log.status + (log.error ? ` — ${log.error}` : "");
+        card.querySelector(".log-block:nth-child(2) pre").textContent = log.params_sha256_16;
         logsList.appendChild(card);
     });
 }

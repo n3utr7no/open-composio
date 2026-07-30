@@ -33,8 +33,12 @@ def cmd_mcp(args) -> int:
 
 def cmd_apps(args) -> int:
     oc = OpenComposio(user_id=args.user)
+    print(f"vault backend: {oc.vault.name}\n")
     for app in oc.get_apps():
-        status = "connected" if app["connected"] else "not connected"
+        if not app["requires_auth"]:
+            status = "no auth needed"
+        else:
+            status = "connected" if app["connected"] else "not connected"
         print(f"{app['id']:<15} {app['name']:<20} [{status}]  {app['description']}")
     return 0
 

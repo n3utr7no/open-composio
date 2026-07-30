@@ -2,5 +2,12 @@
 __pycache__/
 *.egg-info/
 .pytest_cache/
-server/data/
-server/.venv/
+
+# Vault material and audit data — normally in ~/.open-composio, but insurance
+# against OPEN_COMPOSIO_HOME pointing into a repo.
+vault.key
+vault.enc
+vault.salt
+audit.jsonl
+connections_index.json
+.open-composio/

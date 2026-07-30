@@ -1,5 +1,7 @@
 # open-composio
 
+[![CI](https://github.com/n3utr7no/open-composio/actions/workflows/ci.yml/badge.svg)](https://github.com/n3utr7no/open-composio/actions/workflows/ci.yml)
+
 **The local-first MCP tool gateway.** Agent tool integrations — GitHub, web search, weather, your own functions — behind one MCP server and one embeddable SDK, with credentials that **never leave your machine**. Secrets live in your OS keychain (Windows Credential Manager, macOS Keychain, Linux Secret Service), not in anyone's cloud.
 
 Why this exists: hosted tool platforms route your OAuth tokens and API keys through their servers, and their "self-hosted" tiers are closed-source or catalog-crippled.
@@ -21,7 +23,7 @@ The gateway exposes three meta-tools — `search_tools`, `get_tool_schema`, `exe
 Connect an app first (credentials go to the OS keychain):
 
 ```bash
-open-composio apps                 # list apps + connection status
+open-composio apps                 # list apps + connection status + vault backend
 open-composio connect github       # prompts for token, or --field token=ghp_...
 ```
 
@@ -53,19 +55,28 @@ oc.serve_mcp()                             # optional: one line to become an MCP
 open-composio serve        # http://127.0.0.1:8000 — dashboard + /api/*
 ```
 
-Binding beyond localhost requires `OPEN_COMPOSIO_API_TOKEN` (enforced).
+Binding beyond localhost requires `OPEN_COMPOSIO_API_TOKEN` (enforced). The dashboard's Logs view reads the server-side audit log (`GET /api/audit`).
+
+## Security model
+
+Credentials are stored, strongest first:
+
+1. **OS keychain** (default when available) — Windows Credential Manager, macOS Keychain, Linux Secret Service. Secrets are guarded by your OS login.
+2. **Encrypted file with a passphrase** — set `OPEN_COMPOSIO_VAULT_PASSPHRASE`; the Fernet key is derived via scrypt and only a random salt touches disk. Without the passphrase the ciphertext is useless.
+3. **Encrypted file with a generated key file** (headless fallback) — `vault.enc` + `vault.key` side by side. *Know what this buys you:* it protects against accidental disclosure (greps, backups, pasted directory listings), **not** against an attacker who can read the whole data directory. Use a passphrase if that's in your threat model.
+
+Falling back from the keychain is never silent — you get a warning explaining why, because keyring-stored connections would otherwise just "appear disconnected."
+
+Every execution is audit-logged to `~/.open-composio/audit.jsonl` with a SHA-256 fingerprint of the params — raw parameters and results are never written.
 
 ## Where things live
 
 | Piece | Path |
 |---|---|
 | Package (core, SDK, MCP, REST, CLI) | [open_composio/](open_composio/) |
-| Data dir (vault key/index, audit log) | `~/.open-composio` (override: `OPEN_COMPOSIO_HOME`) |
-| Secrets | OS keychain; encrypted-file fallback (`OPEN_COMPOSIO_VAULT=file`) |
-| Audit log (params hashed, never raw) | `~/.open-composio/audit.jsonl` |
-| Tests | `pytest` (25 tests) |
-
-`server/`, `sdk/`, and `dashboard/` at the repo root are the original prototype, superseded by the package (the dashboard now ships inside it). Safe to delete once you're happy.
+| Data dir (vault, salt, audit log) | `~/.open-composio` (override: `OPEN_COMPOSIO_HOME`) |
+| Force a vault backend | `OPEN_COMPOSIO_VAULT=keyring\|file` |
+| Tests | `pytest` (incl. a retrieval eval for `search_tools`) |
 
 ## Roadmap
 

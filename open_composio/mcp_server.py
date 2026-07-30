@@ -67,20 +67,20 @@ def build_mcp_server(oc) -> FastMCP:
     async def execute_tool(tool_name: str, params: Dict[str, Any] = None) -> Any:
         """Execute a tool by its exact name with parameters matching its
         schema (see get_tool_schema)."""
+        # Raise on failure so the MCP client sees isError=true instead of a
+        # "successful" call whose payload happens to describe an error.
         try:
             app_id, action_name = registry.resolve(tool_name)
-        except KeyError as exc:
-            return {"error": str(exc), "hint": "Use search_tools to find the exact tool name."}
+        except KeyError:
+            raise ValueError(
+                f"Tool '{tool_name}' not found. Use search_tools to find the exact tool name."
+            )
         try:
-            result = await oc.executor.aexecute(app_id, action_name, params or {}, oc.user_id)
-            return {"status": "success", "result": result}
-        except NotConnectedError as exc:
-            return {
-                "error": str(exc),
-                "needs_connection": app_id,
-                "hint": f"Ask the user to run: open-composio connect {app_id}",
-            }
-        except Exception as exc:
-            return {"error": str(exc)}
+            return await oc.executor.aexecute(app_id, action_name, params or {}, oc.user_id)
+        except NotConnectedError:
+            raise RuntimeError(
+                f"App '{app_id}' is not connected. Ask the user to run: "
+                f"open-composio connect {app_id}"
+            )
 
     return server

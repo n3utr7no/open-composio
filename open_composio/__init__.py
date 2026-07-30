@@ -15,7 +15,12 @@ from .core import (
     PermissionDenied,
 )
 
-__version__ = "0.2.0"
+try:
+    from importlib.metadata import version as _version
+
+    __version__ = _version("open-composio")
+except Exception:  # not installed (e.g. vendored copy)
+    __version__ = "0.0.0+unknown"
 
 __all__ = [
     "OpenComposio",

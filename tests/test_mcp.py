@@ -36,7 +36,13 @@ async def test_search_then_schema_then_execute(server):
     assert "HI" in text
 
 
-async def test_execute_unknown_tool_returns_hint(server):
-    result = await server.call_tool("execute_tool", {"tool_name": "does_not_exist", "params": {}})
-    text = result[0][0].text if isinstance(result, tuple) else result[0].text
-    assert "search_tools" in text
+async def test_execute_unknown_tool_raises_with_hint(server):
+    with pytest.raises(Exception, match="search_tools"):
+        await server.call_tool("execute_tool", {"tool_name": "does_not_exist", "params": {}})
+
+
+async def test_execute_unconnected_app_raises_with_connect_hint(server):
+    with pytest.raises(Exception, match="open-composio connect github"):
+        await server.call_tool(
+            "execute_tool", {"tool_name": "github_get_user", "params": {}}
+        )

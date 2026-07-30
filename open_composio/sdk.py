@@ -138,13 +138,14 @@ class OpenComposio:
 
     # ------------------------------------------------------------------ apps
 
-    def get_apps(self) -> List[Dict[str, Any]]:
+    def get_apps(self, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        user_id = user_id or self.user_id
         if self._remote:
-            resp = self._http.get(f"{self._base_url}/api/apps", params={"user_id": self.user_id})
+            resp = self._http.get(f"{self._base_url}/api/apps", params={"user_id": user_id})
             resp.raise_for_status()
             return resp.json()["apps"]
 
-        connected = set(self.vault.list_apps(self.user_id))
+        connected = set(self.vault.list_apps(user_id))
         return [
             {
                 "id": app.id,
@@ -152,6 +153,7 @@ class OpenComposio:
                 "description": app.description,
                 "auth_type": app.auth_type,
                 "auth_config": app.auth_config,
+                "requires_auth": app.auth_type != "none",
                 "connected": app.id in connected or app.auth_type == "none",
             }
             for app in self.registry.apps.values()
@@ -176,13 +178,18 @@ class OpenComposio:
 
     # ----------------------------------------------------------- connections
 
-    def connect(self, app_id: str, **auth_data: Any) -> None:
+    def connect(self, app_id: str, user_id: Optional[str] = None, **auth_data: Any) -> None:
         """Store credentials for an app. Embedded mode writes to the local
-        vault (OS keychain by default); remote mode POSTs to the local server."""
+        vault (OS keychain by default); remote mode POSTs to the local server.
+
+        `user_id` scopes the connection (defaults to this client's user); an
+        auth field literally named "user_id" must be passed via a dict:
+        ``oc.connect("app", **{"user_id": ...})`` is NOT supported for that case."""
+        user_id = user_id or self.user_id
         if self._remote:
             resp = self._http.post(
                 f"{self._base_url}/api/connections/{app_id}",
-                params={"user_id": self.user_id},
+                params={"user_id": user_id},
                 json=auth_data,
             )
             resp.raise_for_status()
@@ -195,35 +202,49 @@ class OpenComposio:
         missing = [f for f in fields if f not in auth_data]
         if missing:
             raise ValueError(f"Missing required auth fields for '{app_id}': {', '.join(missing)}")
-        self.vault.set(self.user_id, app_id, auth_data)
+        self.vault.set(user_id, app_id, auth_data)
 
-    def disconnect(self, app_id: str) -> None:
+    def disconnect(self, app_id: str, user_id: Optional[str] = None) -> None:
+        user_id = user_id or self.user_id
         if self._remote:
             resp = self._http.delete(
-                f"{self._base_url}/api/connections/{app_id}", params={"user_id": self.user_id}
+                f"{self._base_url}/api/connections/{app_id}", params={"user_id": user_id}
             )
             resp.raise_for_status()
             return
-        self.vault.delete(self.user_id, app_id)
+        self.vault.delete(user_id, app_id)
 
     # -------------------------------------------------------------- execution
 
-    def execute(self, app_id: str, action: str, params: Optional[Dict[str, Any]] = None) -> Any:
+    def execute(
+        self,
+        app_id: str,
+        action: str,
+        params: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
+    ) -> Any:
         params = params or {}
+        user_id = user_id or self.user_id
         if self._remote:
             resp = self._http.post(
                 f"{self._base_url}/api/execute/{app_id}/{action}",
-                json={"user_id": self.user_id, "params": params},
+                json={"user_id": user_id, "params": params},
             )
             resp.raise_for_status()
             return resp.json().get("result")
-        return self.executor.execute(app_id, action, params, self.user_id)
+        return self.executor.execute(app_id, action, params, user_id)
 
-    async def aexecute(self, app_id: str, action: str, params: Optional[Dict[str, Any]] = None) -> Any:
+    async def aexecute(
+        self,
+        app_id: str,
+        action: str,
+        params: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
+    ) -> Any:
         params = params or {}
         if self._remote:
             raise RuntimeError("aexecute() is only available in embedded mode.")
-        return await self.executor.aexecute(app_id, action, params, self.user_id)
+        return await self.executor.aexecute(app_id, action, params, user_id or self.user_id)
 
     # ------------------------------------------------------------------ tools
 

@@ -1,9 +1,10 @@
 """REST facade: the original HTTP API plus the dashboard, over the shared core.
 
-Endpoint paths are unchanged from the original `server/main.py`, so existing
-clients keep working. New:
+Endpoint paths are unchanged from the original prototype, so existing clients
+keep working. New:
 
 - Dashboard is served from this same origin at `/` (no CORS gymnastics).
+- `GET /api/audit` surfaces the server-side audit log (params hashed, never raw).
 - Optional bearer auth: set OPEN_COMPOSIO_API_TOKEN to require
   `Authorization: Bearer <token>` on /api/*. Required before binding
   to anything other than 127.0.0.1.
@@ -34,7 +35,7 @@ def _require_token(request: Request) -> None:
 
 def create_app(oc: Optional[OpenComposio] = None) -> FastAPI:
     oc = oc or OpenComposio()
-    app = FastAPI(title="OpenComposio Server", version="0.2.0")
+    app = FastAPI(title="OpenComposio Server", version="0.3.0")
 
     # The dashboard is same-origin; this only matters for tools hitting the
     # API from other local dev servers.
@@ -48,8 +49,7 @@ def create_app(oc: Optional[OpenComposio] = None) -> FastAPI:
 
     @app.get("/api/apps", dependencies=[Depends(_require_token)])
     def list_apps(user_id: str = "default_user"):
-        scoped = oc if user_id == oc.user_id else _scoped(oc, user_id)
-        return {"apps": scoped.get_apps()}
+        return {"apps": oc.get_apps(user_id=user_id)}
 
     @app.get("/api/apps/{app_id}/actions", dependencies=[Depends(_require_token)])
     def list_actions(app_id: str):
@@ -65,16 +65,20 @@ def create_app(oc: Optional[OpenComposio] = None) -> FastAPI:
         auth_data: Dict[str, Any] = Body(...),
     ):
         try:
-            _scoped(oc, user_id).connect(app_id, **auth_data)
+            oc.connect(app_id, user_id=user_id, **auth_data)
         except KeyError:
             raise HTTPException(status_code=404, detail="App not found")
+        except TypeError:
+            raise HTTPException(
+                status_code=422, detail="Auth field 'user_id' is reserved; rename the field."
+            )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         return {"status": "success", "message": f"Connected to {app_id} successfully."}
 
     @app.delete("/api/connections/{app_id}", dependencies=[Depends(_require_token)])
     def remove_connection(app_id: str, user_id: str = "default_user"):
-        _scoped(oc, user_id).disconnect(app_id)
+        oc.disconnect(app_id, user_id=user_id)
         return {"status": "success", "message": f"Connection to {app_id} removed."}
 
     @app.post("/api/execute/{app_id}/{action_name}", dependencies=[Depends(_require_token)])
@@ -97,17 +101,11 @@ def create_app(oc: Optional[OpenComposio] = None) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
 
+    @app.get("/api/audit", dependencies=[Depends(_require_token)])
+    def read_audit(limit: int = 100):
+        return {"records": oc.executor.read_audit(limit=min(limit, 1000))}
+
     if DASHBOARD_DIR.exists():
         app.mount("/", StaticFiles(directory=str(DASHBOARD_DIR), html=True), name="dashboard")
 
     return app
-
-
-def _scoped(oc: OpenComposio, user_id: str) -> OpenComposio:
-    """A lightweight view of the same core under a different user id."""
-    if user_id == oc.user_id:
-        return oc
-    view = object.__new__(OpenComposio)
-    view.__dict__.update(oc.__dict__)
-    view.user_id = user_id
-    return view

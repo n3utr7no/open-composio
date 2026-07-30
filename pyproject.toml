@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "open-composio"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local-first MCP tool gateway: agent tool integrations whose credentials never leave your machine."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,7 +30,7 @@ open-composio = "open_composio.cli:main"
 include = ["open_composio*"]
 
 [tool.setuptools.package-data]
-open_composio = ["dashboard/*"]
+open_composio = ["dashboard/*", "py.typed"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

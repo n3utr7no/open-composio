@@ -93,6 +93,21 @@ class Executor:
         except OSError:
             pass  # auditing must never take down execution
 
+    def read_audit(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Most recent audit records, newest first."""
+        try:
+            with open(self._audit_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            return []
+        records = []
+        for line in reversed(lines[-limit:]):
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return records
+
     async def aexecute(
         self,
         app_id: str,
