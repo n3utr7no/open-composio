@@ -18,7 +18,14 @@ def setup(tmp_path):
     async def echo(params, auth_data=None):
         return {"params": params, "auth": auth_data}
 
-    schema = {"description": "echo", "type": "object", "properties": {}}
+    # An echo tool genuinely accepts freeform params, so it opts out of the
+    # default "reject unknown properties" validation.
+    schema = {
+        "description": "echo",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": True,
+    }
     reg.register_action("open", "echo", schema, echo)
     reg.register_action("locked", "echo", schema, echo)
 

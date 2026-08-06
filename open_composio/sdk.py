@@ -10,18 +10,22 @@ no server, no port, nothing leaves the machine:
     tools = oc.get_tools("github", "web_search")
     tools.as_openai()                              # OpenAI function definitions
     tools.as_anthropic()                           # Anthropic tool definitions
-    result = tools.call("github_get_user", {})
+
+    result = tools.call("github_get_user", {})           # sync callers
+    result = await tools.acall("github_get_user", {})    # async agent frameworks
 
 Remote mode talks to a shared local server over REST with the same API:
 
     oc = OpenComposio(base_url="http://127.0.0.1:8000")
 """
 
+import asyncio
 import inspect
 import json
 from typing import Any, Callable, Dict, List, Optional
 
 from .core.executor import Executor
+from .core.policy import Policy
 from .core.registry import AppDefinition, ToolRegistry
 from .core.vault import BaseVault, default_vault
 
@@ -57,13 +61,33 @@ def _schema_from_signature(fn: Callable, description: str) -> Dict[str, Any]:
 
 
 class Tool:
-    """A single action bound to a client, renderable in multiple tool formats."""
+    """A single action bound to a client, renderable in multiple tool formats.
 
-    def __init__(self, full_name: str, description: str, schema: Dict[str, Any], invoker: Callable):
+    Callable synchronously (`tool(params)`) or from async code
+    (`await tool.acall(params)`).
+    """
+
+    def __init__(
+        self,
+        full_name: str,
+        description: str,
+        schema: Dict[str, Any],
+        invoker: Callable,
+        ainvoker: Optional[Callable] = None,
+        app_id: str = "",
+        connected: bool = True,
+    ):
         self.name = full_name
         self.description = description
         self.schema = schema
+        self.app_id = app_id
+        self.connected = connected
         self._invoke = invoker
+        self._ainvoke = ainvoker
+
+    @property
+    def needs_connection(self) -> bool:
+        return not self.connected
 
     def as_openai(self) -> Dict[str, Any]:
         return {
@@ -85,8 +109,22 @@ class Tool:
     def __call__(self, params: Optional[Dict[str, Any]] = None) -> Any:
         return self._invoke(self.name, params or {})
 
+    async def acall(self, params: Optional[Dict[str, Any]] = None) -> Any:
+        if self._ainvoke is None:
+            # Remote mode: no async HTTP client, so offload the sync call.
+            return await asyncio.to_thread(self._invoke, self.name, params or {})
+        return await self._ainvoke(self.name, params or {})
+
     def __repr__(self) -> str:
-        return f"<Tool {self.name}>"
+        suffix = "" if self.connected else " (needs connection)"
+        return f"<Tool {self.name}{suffix}>"
+
+
+def _coerce_arguments(arguments: Any) -> Dict[str, Any]:
+    """LLM tool-call payloads arrive as dicts or JSON strings."""
+    if isinstance(arguments, str):
+        return json.loads(arguments) if arguments.strip() else {}
+    return arguments or {}
 
 
 class ToolCollection(list):
@@ -96,15 +134,19 @@ class ToolCollection(list):
     def as_anthropic(self) -> List[Dict[str, Any]]:
         return [t.as_anthropic() for t in self]
 
-    def call(self, name: str, arguments: Any) -> Any:
-        """Dispatch a tool call by name. `arguments` may be a dict or a JSON
-        string (as returned in LLM tool-call payloads)."""
-        if isinstance(arguments, str):
-            arguments = json.loads(arguments) if arguments.strip() else {}
+    def get(self, name: str) -> Tool:
         for tool in self:
             if tool.name == name:
-                return tool(arguments)
+                return tool
         raise KeyError(f"Tool '{name}' is not in this collection.")
+
+    def call(self, name: str, arguments: Any = None) -> Any:
+        """Dispatch a tool call by name from sync code."""
+        return self.get(name)(_coerce_arguments(arguments))
+
+    async def acall(self, name: str, arguments: Any = None) -> Any:
+        """Dispatch a tool call by name from async code (agent frameworks)."""
+        return await self.get(name).acall(_coerce_arguments(arguments))
 
 
 class OpenComposio:
@@ -115,6 +157,10 @@ class OpenComposio:
         vault: Optional[BaseVault] = None,
         load_builtin: bool = True,
         audit: bool = True,
+        policy: Optional[Policy] = None,
+        load_policy_file: bool = True,
+        load_upstreams: bool = True,
+        **executor_options: Any,
     ):
         self.user_id = user_id
         self._remote = base_url is not None
@@ -127,14 +173,30 @@ class OpenComposio:
             self.registry = None
             self.vault = None
             self.executor = None
-        else:
-            self.registry = ToolRegistry()
-            self.vault = vault or default_vault()
-            self.executor = Executor(self.registry, self.vault, audit=audit)
-            if load_builtin:
-                from .apps import load_builtin_apps
+            self.upstreams = None
+            return
 
-                load_builtin_apps(self.registry)
+        self.registry = ToolRegistry()
+        self.vault = vault or default_vault()
+        if policy is None and load_policy_file:
+            policy = Policy.load()
+        self.executor = Executor(
+            self.registry, self.vault, audit=audit, policy=policy, **executor_options
+        )
+        if load_builtin:
+            from .apps import load_builtin_apps
+
+            load_builtin_apps(self.registry)
+
+        from .upstream import UpstreamManager
+
+        self.upstreams = UpstreamManager(self.registry, self.vault, self.user_id)
+        if load_upstreams:
+            self.upstreams.load_all()
+
+    @property
+    def policy(self) -> Optional[Policy]:
+        return None if self._remote else self.executor.policy
 
     # ------------------------------------------------------------------ apps
 
@@ -214,6 +276,30 @@ class OpenComposio:
             return
         self.vault.delete(user_id, app_id)
 
+    async def verify(self, app_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Smoke-test stored credentials by calling the app's cheapest
+        read-only action, so a typo'd token fails now rather than mid-run."""
+        if self._remote:
+            raise RuntimeError("verify() is only available in embedded mode.")
+        app = self.registry.apps.get(app_id)
+        if app is None:
+            raise KeyError(f"App '{app_id}' not found.")
+        probe = next(
+            (
+                name
+                for name, action in app.actions.items()
+                if action.parameters_schema.get("x-verify")
+            ),
+            None,
+        )
+        if probe is None:
+            return {"ok": None, "detail": "No verification probe defined for this app."}
+        try:
+            await self.aexecute(app_id, probe, {}, user_id=user_id)
+            return {"ok": True, "detail": f"{app_id}.{probe} succeeded."}
+        except Exception as exc:
+            return {"ok": False, "detail": str(exc)}
+
     # -------------------------------------------------------------- execution
 
     def execute(
@@ -242,17 +328,34 @@ class OpenComposio:
         user_id: Optional[str] = None,
     ) -> Any:
         params = params or {}
+        user_id = user_id or self.user_id
         if self._remote:
-            raise RuntimeError("aexecute() is only available in embedded mode.")
-        return await self.executor.aexecute(app_id, action, params, user_id or self.user_id)
+            return await asyncio.to_thread(self.execute, app_id, action, params, user_id)
+        return await self.executor.aexecute(app_id, action, params, user_id)
 
     # ------------------------------------------------------------------ tools
 
-    def get_tools(self, *app_ids: str) -> ToolCollection:
-        """Bound tools for the given apps (all apps if none given)."""
-        wanted = list(app_ids) if app_ids else [a["id"] for a in self.get_apps()]
+    def get_tools(
+        self,
+        *app_ids: str,
+        connected_only: bool = True,
+    ) -> ToolCollection:
+        """Bound tools for the given apps (all apps if none given).
+
+        By default only apps with credentials are included — handing an agent
+        tools it cannot authenticate just burns a turn. Pass
+        ``connected_only=False`` to include them (each carries
+        ``needs_connection``).
+        """
+        apps = {a["id"]: a for a in self.get_apps()}
+        wanted = list(app_ids) if app_ids else list(apps)
+
         tools = ToolCollection()
         for app_id in wanted:
+            info = apps.get(app_id, {})
+            connected = info.get("connected", True)
+            if connected_only and not connected:
+                continue
             for action in self.get_actions(app_id):
                 full_name = f"{app_id}_{action['name']}"
                 tools.append(
@@ -261,6 +364,9 @@ class OpenComposio:
                         description=action["description"],
                         schema=action["parameters_schema"],
                         invoker=self._make_invoker(app_id, action["name"]),
+                        ainvoker=self._make_ainvoker(app_id, action["name"]),
+                        app_id=app_id,
+                        connected=connected,
                     )
                 )
         return tools
@@ -271,12 +377,20 @@ class OpenComposio:
 
         return invoke
 
+    def _make_ainvoker(self, app_id: str, action: str) -> Callable:
+        async def ainvoke(_full_name: str, params: Dict[str, Any]) -> Any:
+            return await self.aexecute(app_id, action, params)
+
+        return ainvoke
+
     def tool(
         self,
         fn: Optional[Callable] = None,
         *,
         name: Optional[str] = None,
         description: Optional[str] = None,
+        destructive: Optional[bool] = None,
+        cache_ttl: Optional[float] = None,
     ):
         """Decorator: register a local Python function as a tool.
 
@@ -285,8 +399,8 @@ class OpenComposio:
                 \"\"\"Add two numbers.\"\"\"
                 return a + b
 
-        The function flows through the same executor (middleware, audit) as
-        catalog apps, under the app id ``local``.
+        The function flows through the same executor (validation, policy,
+        middleware, audit) as catalog apps, under the app id ``local``.
         """
         if self._remote:
             raise RuntimeError("@oc.tool requires embedded mode (no base_url).")
@@ -295,6 +409,10 @@ class OpenComposio:
             tool_name = name or func.__name__
             desc = description or (inspect.getdoc(func) or tool_name).strip().split("\n")[0]
             schema = _schema_from_signature(func, desc)
+            if destructive is not None:
+                schema["x-destructive"] = destructive
+            if cache_ttl:
+                schema["x-cache-ttl"] = cache_ttl
 
             if LOCAL_APP_ID not in self.registry.apps:
                 self.registry.register_app(

@@ -82,6 +82,8 @@ def register(registry: ToolRegistry) -> None:
                 }
             },
             "required": ["query"],
+            "x-destructive": False,
+            "x-cache-ttl": 300,
         },
         handler=search_duckduckgo,
     )

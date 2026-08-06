@@ -14,7 +14,8 @@ from typing import Any, Dict
 
 from mcp.server.fastmcp import FastMCP
 
-from .core.executor import NotConnectedError
+from .core.executor import NotConnectedError, ValidationError
+from .core.policy import ApprovalRequired, PolicyDenied, is_destructive
 
 
 def build_mcp_server(oc) -> FastMCP:
@@ -26,7 +27,8 @@ def build_mcp_server(oc) -> FastMCP:
             "to find relevant tools, get_tool_schema to see a tool's parameters, "
             "then execute_tool to run it. Credentials stay on this machine; if a "
             "tool reports it needs a connection, tell the user to run "
-            "`open-composio connect <app>`."
+            "`open-composio connect <app>`. Tools marked destructive change "
+            "remote state — confirm with the user before calling them."
         ),
     )
     registry = oc.registry
@@ -37,15 +39,18 @@ def build_mcp_server(oc) -> FastMCP:
         return app.auth_type == "none" or vault.get(oc.user_id, app_id) is not None
 
     @server.tool()
-    def search_tools(query: str) -> list:
+    def search_tools(query: str, limit: int = 8) -> list:
         """Search available tools by task description (e.g. 'create a github
-        issue', 'current weather'). Returns tool names, descriptions, and
-        whether the app is connected and ready to use."""
-        results = registry.search(query, limit=8)
+        issue', 'current weather'). Returns tool names, descriptions, whether
+        the app is connected, and whether the tool changes remote state."""
+        results = registry.search(query, limit=min(limit, 25))
         for r in results:
-            r["connected"] = _connected(r["app_id"])
+            app_id, action_name = registry.resolve(r["tool"])
+            schema = registry.get_action(app_id, action_name).parameters_schema
+            r["connected"] = _connected(app_id)
+            r["destructive"] = is_destructive(action_name, schema)
             if not r["connected"]:
-                r["note"] = f"Needs connection: `open-composio connect {r['app_id']}`"
+                r["note"] = f"Needs connection: `open-composio connect {app_id}`"
             del r["score"]
         return results
 
@@ -61,6 +66,7 @@ def build_mcp_server(oc) -> FastMCP:
             "description": action.description,
             "parameters_schema": action.parameters_schema,
             "connected": _connected(app_id),
+            "destructive": is_destructive(action_name, action.parameters_schema),
         }
 
     @server.tool()
@@ -81,6 +87,12 @@ def build_mcp_server(oc) -> FastMCP:
             raise RuntimeError(
                 f"App '{app_id}' is not connected. Ask the user to run: "
                 f"open-composio connect {app_id}"
+            )
+        except ValidationError as exc:
+            raise ValueError(f"Invalid parameters for '{tool_name}': {exc}")
+        except (PolicyDenied, ApprovalRequired) as exc:
+            raise RuntimeError(
+                f"{exc} Relay this to the user — do not attempt to work around it."
             )
 
     return server

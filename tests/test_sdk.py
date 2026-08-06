@@ -8,8 +8,24 @@ def test_builtin_apps_loaded(oc):
     assert {"github", "weather", "web_search"} <= ids
 
 
+def test_get_tools_hides_unconnected_by_default(oc):
+    # github has no credentials in this fixture — handing an agent tools it
+    # cannot authenticate just burns a turn.
+    assert oc.get_tools("github") == []
+
+    tools = oc.get_tools("github", connected_only=False)
+    assert {t.name for t in tools} == {"github_get_user", "github_create_issue"}
+    assert all(t.needs_connection for t in tools)
+
+    oc.connect("github", token="ghp_test")
+    assert {t.name for t in oc.get_tools("github")} == {
+        "github_get_user",
+        "github_create_issue",
+    }
+
+
 def test_get_tools_adapters(oc):
-    tools = oc.get_tools("github")
+    tools = oc.get_tools("github", connected_only=False)
     names = {t.name for t in tools}
     assert names == {"github_get_user", "github_create_issue"}
 

@@ -58,6 +58,8 @@ def register(registry: ToolRegistry) -> None:
                 }
             },
             "required": ["location"],
+            "x-destructive": False,
+            "x-cache-ttl": 300,
         },
         handler=get_weather,
     )

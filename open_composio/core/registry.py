@@ -49,6 +49,14 @@ class ToolRegistry:
         self._action_handlers[full_name] = handler
         self._full_names[full_name] = (app_id, action_name)
 
+    def remove_app(self, app_id: str) -> None:
+        """Drop an app and every action registered under it."""
+        self.apps.pop(app_id, None)
+        for full_name, (owner, _) in list(self._full_names.items()):
+            if owner == app_id:
+                del self._full_names[full_name]
+                self._action_handlers.pop(full_name, None)
+
     def resolve(self, full_name: str) -> Tuple[str, str]:
         """Map a full tool name like ``github_create_issue`` back to (app_id, action)."""
         if full_name not in self._full_names:

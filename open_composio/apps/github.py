@@ -71,6 +71,9 @@ def register(registry: ToolRegistry) -> None:
             "description": "Get authenticated user profile details from GitHub.",
             "type": "object",
             "properties": {},
+            "x-destructive": False,
+            "x-verify": True,  # cheap read-only probe for `connect --verify`
+            "x-cache-ttl": 60,
         },
         handler=github_get_user,
     )
@@ -87,6 +90,7 @@ def register(registry: ToolRegistry) -> None:
                 "body": {"type": "string", "description": "Body description of the issue"},
             },
             "required": ["owner", "repo", "title"],
+            "x-destructive": True,
         },
         handler=github_create_issue,
     )
