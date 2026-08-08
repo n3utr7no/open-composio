@@ -14,20 +14,16 @@ def test_get_tools_hides_unconnected_by_default(oc):
     assert oc.get_tools("github") == []
 
     tools = oc.get_tools("github", connected_only=False)
-    assert {t.name for t in tools} == {"github_get_user", "github_create_issue"}
+    assert {"github_get_user", "github_create_issue"} <= {t.name for t in tools}
     assert all(t.needs_connection for t in tools)
 
     oc.connect("github", token="ghp_test")
-    assert {t.name for t in oc.get_tools("github")} == {
-        "github_get_user",
-        "github_create_issue",
-    }
+    assert {t.name for t in oc.get_tools("github")} == {t.name for t in tools}
 
 
 def test_get_tools_adapters(oc):
     tools = oc.get_tools("github", connected_only=False)
-    names = {t.name for t in tools}
-    assert names == {"github_get_user", "github_create_issue"}
+    assert {"github_get_user", "github_create_issue"} <= {t.name for t in tools}
 
     openai_defs = tools.as_openai()
     assert openai_defs[0]["type"] == "function"

@@ -4,6 +4,22 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
 
+# Filler words carry no signal but do real damage: a bare "a" substring-matches
+# any tool whose name merely contains the letter, which is enough to outrank a
+# genuine hit on a large catalog.
+_STOPWORDS = frozenset(
+    {"the", "and", "for", "from", "with", "that", "this", "please", "all", "any"}
+)
+
+
+def _tokenize(query: str) -> List[str]:
+    tokens = [t.strip(".,!?;:'\"()") for t in query.lower().split()]
+    tokens = [t for t in tokens if t]
+    meaningful = [t for t in tokens if len(t) > 2 and t not in _STOPWORDS]
+    # An all-stopword query ("in a") is better served by weak matches than none.
+    return meaningful or tokens
+
+
 class ActionDefinition(BaseModel):
     name: str
     description: str
@@ -74,17 +90,22 @@ class ToolRegistry:
     def search(self, query: str, limit: int = 8) -> List[Dict[str, Any]]:
         """Rank actions against a free-text query. Returns dicts with
         full tool name, description and app id, best match first."""
-        tokens = [t for t in query.lower().split() if t]
+        tokens = _tokenize(query)
         scored = []
         for full_name, app_id, action in self.iter_actions():
             name_l = full_name.lower()
+            name_words = set(name_l.split("_"))
             desc_l = action.description.lower()
             score = 0.0
             for tok in tokens:
                 if tok == name_l:
                     score += 4
+                elif tok in name_words:
+                    # A whole word in the tool name. Scored above a bare
+                    # substring so "star" prefers star_repo over unstar_repo.
+                    score += 3
                 elif tok in name_l:
-                    score += 2
+                    score += 1.5
                 if tok in desc_l:
                     score += 1
             score += difflib.SequenceMatcher(None, query.lower(), name_l).ratio()

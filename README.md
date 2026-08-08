@@ -47,6 +47,13 @@ open-composio apps                 # apps, connection status, vault backend, pol
 open-composio connect github --verify   # prompts securely, then smoke-tests the token
 ```
 
+**GitHub** ships 23 actions — repos (list, get, create, branches, commits, file contents),
+issues (list, get, create, update, comment, labels), pull requests (list, get, create,
+merge), search (repos, code, issues) and stars. Reads are cached and slimmed: GitHub's raw
+objects are large enough that one 30-item listing would blow past `max_result_bytes`, so
+listings carry identifying fields only and single-object reads add the body detail. The
+nine actions that write are marked `x-destructive`, so a policy can hold them for approval.
+
 ## Use as an embedded SDK (no server at all)
 
 ```python
@@ -127,7 +134,7 @@ Params are validated against the action's JSON Schema before dispatch, so a hall
 | Data dir (vault, policy, audit, upstream cache) | `~/.open-composio` (override: `OPEN_COMPOSIO_HOME`) |
 | Force a vault backend | `OPEN_COMPOSIO_VAULT=keyring\|file` |
 | Context benchmark | [scripts/benchmark_context.py](scripts/benchmark_context.py) |
-| Tests | `pytest` (79, incl. a `search_tools` retrieval eval and real MCP proxying) |
+| Tests | `pytest` (173, incl. a `search_tools` retrieval eval and real MCP proxying) |
 
 ## Roadmap
 
